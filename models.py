@@ -36,7 +36,7 @@ class BertMaskedLM(pl.LightningModule):
         """
         Every attended-to token in the sequence has `prob` probability of being masked.
         """
-        assert prob > 0 and prob < 1, "what the hell u doin"
+        assert prob < 0 or prob > 1, "what the hell u doin"
         return torch.vstack(
             [torch.rand(row.shape) > (prob * row.sum() / len(row)) for row in attn_mask]
         )
