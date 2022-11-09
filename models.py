@@ -227,9 +227,7 @@ class GPT2(pl.LightningModule):
         x = list(x)
 
         o = self(x)
-        loss = F.cross_entropy(
-            o,
-        )
+        loss = F.cross_entropy(o, o, reduction="mean")
         # perplexity = torch.exp(loss)
 
         self.log("train_loss", loss, on_step=True, on_epoch=False)
@@ -241,7 +239,7 @@ class GPT2(pl.LightningModule):
         y = y.float()
 
         o = self(x)
-        loss = F.cross_entropy(o, y, reduction="mean")
+        loss = F.cross_entropy(o, o, reduction="mean")
         # perplexity = torch.exp(loss)
 
         self.log("val_loss", loss, on_step=False, on_epoch=True)

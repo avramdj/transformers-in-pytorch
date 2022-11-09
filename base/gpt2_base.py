@@ -1,6 +1,7 @@
 from torch import nn
 
-from base.transformer_base import Decoder, PositionalEncoding
+from base.transformer_base import Decoder
+from base.positional_base import PositionalEncoding
 
 
 class GPT2Base(nn.Module):
