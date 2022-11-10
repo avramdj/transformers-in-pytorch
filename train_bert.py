@@ -1,4 +1,6 @@
+import json
 import os
+import sys
 from argparse import ArgumentParser
 
 import pytorch_lightning as pl
@@ -11,11 +13,11 @@ from models import BertMaskedLM
 if __name__ == "__main__":
     os.environ["TOKENIZERS_PARALLELISM"] = os.getenv("TOKENIZERS_PARALLELISM", "false")
 
+    with open("datasets_config.json") as f:
+        ds_conf = json.load(f)
+
     parser = ArgumentParser()
-    parser.add_argument(
-        "dataset_path",
-        help="Path to the tweet dataset. Download from kaggle `https://www.kaggle.com/datasets/kazanova/sentiment140`",
-    )
+    parser.add_argument("dataset", choices=list(ds_conf.keys()))
     parser.add_argument("--device", default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--epochs", default=5, type=int)
     parser.add_argument("--batch_size", default=16, type=int)
@@ -31,7 +33,8 @@ if __name__ == "__main__":
     epochs = args.epochs
     batch_size = args.batch_size
 
-    dataset = datasets.TweetDataset(args.dataset_path, max_size=args.dataset_size)
+    ds_class = getattr(sys.modules[datasets.__name__], ds_conf[args.dataset]["class"])
+    dataset = ds_class(ds_conf[args.dataset]["path"], max_size=args.dataset_size)
     train_dataset, val_dataset = train_test_split(dataset, train_size=0.8)
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, num_workers=args.num_workers, shuffle=True

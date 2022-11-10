@@ -1,7 +1,7 @@
 from torch import nn
 
-from base.transformer_base import Encoder
 from base.positional_base import PositionalEncoding
+from base.transformer_base import Encoder
 
 
 class BERT(nn.Module):

@@ -1,6 +1,9 @@
+import os
+
+import einops
 import pytorch_lightning as pl
 import torch
-import torchmetrics
+import torch
 from torch import nn
 from torch.nn import functional as F
 from transformers import AutoTokenizer
@@ -21,6 +24,7 @@ class BertMaskedLM(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        self.vocab_size = self.tokenizer.vocab_size
         self.mask_str = self.tokenizer.special_tokens_map["mask_token"]
         self.mask_id = self.tokenizer.vocab[self.mask_str]
         self.mask_prob = mask_prob
@@ -41,14 +45,7 @@ class BertMaskedLM(pl.LightningModule):
             [torch.rand(row.shape) > (prob * row.sum() / len(row)) for row in attn_mask]
         )
 
-    def training_step(self, train_batch, batch_idx):
-
-        if batch_idx % 200 == 0:
-            self.print_prompt("The movie was very [MASK] and boring")
-
-        x, _ = train_batch
-        x = list(x)
-
+    def step(self, x):
         t = self.tokenizer(x, return_tensors="pt", padding=True)
         ids = t["input_ids"]
         attn_mask = t["attention_mask"]
@@ -57,54 +54,78 @@ class BertMaskedLM(pl.LightningModule):
             ids = ids.cuda()
             attn_mask = attn_mask.cuda()
 
-        fill_mask = torch.rand(ids.shape).to(attn_mask.device.type) < self.mask_prob
-        special_mask = (
+        rand_dist = torch.rand(ids.shape).to(attn_mask.device.type)
+        # fill `self.mask_prob * 100` % of tokens with [MASK]
+        fill_mask = rand_dist < self.mask_prob
+        # Fill 15% of the masked tokens with random words instead
+        fill_mask_random = rand_dist < self.mask_prob * 0.15
+
+        non_special_mask = (
             torch.isin(
                 ids, torch.Tensor(self.tokenizer.all_special_ids).to(ids.device.type)
             )
             == 0
         )
-        fill_mask = fill_mask * special_mask  # we don't want to mask special tokens
+        # we don't want to mask special tokens
+        fill_mask = fill_mask * non_special_mask
+        fill_mask_random = fill_mask_random * non_special_mask
 
+        # get random tokens to fill in `fill_mask_random`
+        fill_mask_random_values = torch.randint(
+            1, self.vocab_size, fill_mask_random.shape
+        ).to(attn_mask.device.type)
+
+        # filling
         masked_ids = torch.clone(ids)
-        masked_ids[fill_mask] = self.mask_id
+        masked_ids.masked_fill_(fill_mask, self.mask_id)
+        masked_ids.masked_scatter_(fill_mask_random, fill_mask_random_values)
 
         o = self(masked_ids, attn_mask)
 
-        oh_target = F.one_hot(ids, num_classes=self.tokenizer.vocab_size).type(o.dtype)
-        loss = F.cross_entropy(o, oh_target)
+        oh_target = F.one_hot(ids, num_classes=self.vocab_size).type(o.dtype)
+        o = einops.rearrange(o, "b s d -> 1 (b s) d")
+        oh_target = einops.rearrange(oh_target, "b s d -> 1 (b s) d")
+        flat_mask = fill_mask.view(-1)
+        w = flat_mask.type(torch.float32)
+        w = w.masked_fill(flat_mask, 1)
+        w = w.masked_fill(~flat_mask, 0.2)
+        w = w.masked_fill(~non_special_mask.view(-1), 0)
+        loss = F.cross_entropy(o, oh_target, reduction="mean", weight=w)
+        return loss
+
+    def training_step(self, train_batch, batch_idx):
+
+        if batch_idx % 200 == 0:
+            self.print_prompt("The movie was very [MASK] and boring")
+
+        s1, s2 = train_batch
+        s1 = list(s1)
+        s2 = list(s2)
+        s = s1
+
+        loss = self.step(s)
 
         self.log("train_loss", loss, on_step=True, on_epoch=False)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
-        x, _ = val_batch
-        x = list(x)
+        s1, s2 = val_batch
+        s1 = list(s1)
+        s2 = list(s2)
+        s = s1
 
-        t = self.tokenizer(x, return_tensors="pt", padding=True)
-        ids = t["input_ids"]
-        attn_mask = t["attention_mask"]
-
-        if self.device.type == "cuda":
-            ids = ids.cuda()
-            attn_mask = attn_mask.cuda()
-
-        fill_mask = torch.rand(ids.shape).to(attn_mask.device.type) < self.mask_prob
-        fill_mask = fill_mask * attn_mask  # we don't want to mask [PAD] tokens
-        pre_mask = ids[fill_mask]
-
-        ids[fill_mask] = self.mask_id
-        o = self(ids, attn_mask)
-        ids[fill_mask] = pre_mask
-
-        oh_target = F.one_hot(ids, num_classes=self.tokenizer.vocab_size).type(o.dtype)
-        loss = F.cross_entropy(o, oh_target)
+        loss = self.step(s)
 
         self.log("val_loss", loss, on_step=True, on_epoch=False)
         return loss
 
     def on_train_epoch_end(self):
-        pass
+        save_path = os.path.join(
+            self.trainer.log_dir, f"encoder-{self.trainer.global_step}"
+        )
+        with open(save_path) as f:
+            torch.save(self.encode, f)
+            print(f"Saved base checkpoint at {save_path}")
 
     def print_prompt(self, prompt):
         with torch.no_grad():
@@ -128,7 +149,7 @@ class BertMaskedLM(pl.LightningModule):
             print()
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-4)
+        return torch.optim.Adam(self.parameters(), lr=3.5e-5)
 
     def forward(self, ids, mask=None):
         x = self.encode(ids, mask=mask)
