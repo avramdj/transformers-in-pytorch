@@ -5,6 +5,9 @@ from torch import nn
 from torch.nn import functional as F
 
 
+MAX_TRILL = 1000
+
+
 class MhaBlock(nn.Module):
     def __init__(self, d_model, n_heads=10):
         super().__init__()
@@ -27,9 +30,6 @@ class MhaBlock(nn.Module):
     def attention(self, q, k, v, mask):
         scores = torch.einsum("b h i d, b h j d -> b h i j", q, k) / np.sqrt(self.d_k)
         if mask is not None:
-            mask = einops.repeat(
-                mask, "b s -> b h f s", h=self.n_heads, f=mask.shape[-1]
-            )
             scores = scores.masked_fill(mask == 0, np.NINF)
         a = F.softmax(scores, dim=-1)
         x = a @ v
@@ -91,11 +91,16 @@ class EncoderBlock(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, d_model, n_layers, n_heads):
         super().__init__()
+        self.n_heads = n_heads
         self.layers = nn.ModuleList(
             [EncoderBlock(d_model, n_heads) for _ in range(n_layers)]
         )
 
     def forward(self, x, mask=None):
+        if mask is not None:
+            mask = einops.repeat(
+                mask, "b s -> b h f s", h=self.n_heads, f=mask.shape[-1]
+            )
         for layer in self.layers:
             x = layer(x, mask=mask)
         return x
@@ -118,11 +123,19 @@ class DecoderBlock(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, d_model, n_layers, n_heads):
         super().__init__()
+        self.n_heads = n_heads
         self.layers = nn.ModuleList(
             [DecoderBlock(d_model, n_heads) for _ in range(n_layers)]
         )
+        self.register_buffer("tril_mask", torch.tril(torch.ones(MAX_TRILL, MAX_TRILL)))
 
     def forward(self, x, mask=None):
+        if mask is not None:
+            seq_len = mask.shape[-1]
+            mask = einops.repeat(
+                mask, "b s -> b h f s", h=self.n_heads, f=seq_len
+            )
+            mask = mask * self.tril_mask[0:seq_len, 0:seq_len]
         for layer in self.layers:
             x = layer(x, mask=mask)
         return x
