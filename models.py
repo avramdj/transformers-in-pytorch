@@ -6,6 +6,7 @@ import torch
 import torch
 from torch import nn
 from torch.nn import functional as F
+import torchmetrics
 from transformers import AutoTokenizer
 
 from base.bert_base import BERT
