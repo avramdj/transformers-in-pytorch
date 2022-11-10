@@ -97,6 +97,7 @@ class BertMaskedLM(pl.LightningModule):
     def training_step(self, train_batch, batch_idx):
 
         if batch_idx % 200 == 0:
+            self.print_prompt("You are [MASK] rude")
             self.print_prompt("The movie was very [MASK] and boring")
 
         s1, s2 = train_batch
@@ -124,7 +125,7 @@ class BertMaskedLM(pl.LightningModule):
         save_path = os.path.join(
             self.trainer.log_dir, f"encoder-{self.trainer.global_step}"
         )
-        with open(save_path) as f:
+        with open(save_path, "wb") as f:
             torch.save(self.encode, f)
             print(f"Saved base checkpoint at {save_path}")
 
@@ -139,7 +140,7 @@ class BertMaskedLM(pl.LightningModule):
                 attn_mask = attn_mask.cuda()
 
             o = self(ids, attn_mask)
-            m = torch.topk(o[:, -1], 5, dim=-1)
+            m = torch.topk(o[:, -1], 3, dim=-1)
             indices = m.indices[0]
             values = m.values[0]
             mask_idx = ids == self.mask_id
@@ -189,7 +190,7 @@ class BertClassifier(pl.LightningModule):
         y = y.float()
 
         o = self(x)
-        loss = F.binary_cross_entropy(o, y)
+        loss = F.binary_cross_entropy(o, y) # perplexity loss
 
         self.train_acc(o, y)
         self.log("train_loss", loss, on_step=True, on_epoch=False)
@@ -250,19 +251,16 @@ class GPT2(pl.LightningModule):
 
         o = self(x)
         loss = F.cross_entropy(o, o, reduction="mean")
-        # perplexity = torch.exp(loss)
 
         self.log("train_loss", loss, on_step=True, on_epoch=False)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
-        x, y = val_batch
+        x, _ = val_batch
         x = list(x)
-        y = y.float()
 
         o = self(x)
         loss = F.cross_entropy(o, o, reduction="mean")
-        # perplexity = torch.exp(loss)
 
         self.log("val_loss", loss, on_step=False, on_epoch=True)
 
