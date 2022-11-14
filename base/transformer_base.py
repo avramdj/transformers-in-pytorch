@@ -133,7 +133,7 @@ class DecoderBlock(nn.Module):
         super().__init__()
         self.mmha_sublayer = PreLN(MhaBlock(d_model, n_heads), d_model, dropout)
         self.mha_sublayer = PreLN(MhaBlock(d_model, n_heads), d_model, dropout)
-        self.ffn_sublayer = PreLN(PositionWiseFFN(d_model), d_model, dropout)
+        self.ffn_sublayer = PreLN(PositionWiseFFN(d_model, d_model * 4), d_model, dropout)
 
     def forward(self, x, mask=None):
         masked_q = self.mmha_sublayer(x, mask=mask)

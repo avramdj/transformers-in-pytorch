@@ -153,7 +153,9 @@ class BertMaskedLM(pl.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=1e-4)
-        scheduler = get_linear_schedule_with_warmup(optimizer, 10000, self.trainer.max_epochs * 100000)
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer, 10000, self.trainer.max_epochs * 100000
+        )
         return (
             [optimizer],
             [
@@ -250,7 +252,7 @@ class GPT2(pl.LightningModule):
         self.save_hyperparameters()
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         self.tokenizer.add_special_tokens({"pad_token": "[PAD]"})
-        self.vocab_size = self.tokenizer.vocab_size
+        self.vocab_size = self.tokenizer.vocab_size + 1
         self.decode = GPT2Base(
             self.tokenizer.vocab_size,
             d_model=d_model,
@@ -259,12 +261,33 @@ class GPT2(pl.LightningModule):
         )
         self.output = nn.Linear(d_model, self.vocab_size)
 
+
+    def step(self, x):
+        t = self.tokenizer(x, return_tensors="pt", padding=True)
+        ids = t["input_ids"]
+        attn_mask = t["attention_mask"]
+        if self.device.type == "cuda":
+            ids = ids.cuda()
+            attn_mask = attn_mask.cuda()
+
+        o = self(ids, attn_mask)
+
+        eos = self.tokenizer.special_tokens_map["eos_token"]
+        eos_id = self.tokenizer.vocab[eos]
+        trg = torch.cat([ids[:, 1:], torch.fill(ids[:, 0].unsqueeze(-1), eos_id)], 1)
+
+        
+        o = einops.rearrange(o, "b s v -> (b s) v")
+        trg = einops.rearrange(trg, "b s -> (b s)")
+
+        return F.cross_entropy(o, trg, reduction="mean")
+
+
     def training_step(self, train_batch, batch_idx):
         x, _ = train_batch
         x = list(x)
 
-        o = self(x)
-        loss = F.cross_entropy(o, o, reduction="mean")
+        loss = self.step(x)
 
         self.log("train_loss", loss, on_step=True, on_epoch=False)
         return loss
@@ -273,31 +296,36 @@ class GPT2(pl.LightningModule):
         x, _ = val_batch
         x = list(x)
 
-        o = self(x)
-        loss = F.cross_entropy(o, o, reduction="mean")
+        loss = self.step(x)
 
-        self.log("val_loss", loss, on_step=False, on_epoch=True)
+        self.log("val_loss", loss, on_step=True, on_epoch=False)
+        return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=2e-05)
-
+        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-04)
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer, 10000, self.trainer.max_epochs * 100000
+        )
+        return (
+            [optimizer],
+            [
+                {
+                    "scheduler": scheduler,
+                    "interval": "step",
+                    "frequency": 1,
+                    "reduce_on_plateau": False,
+                    "monitor": "val_loss",
+                }
+            ],
+        )
     def generate(self, prompt, n=1):
         pass
 
     def on_train_epoch_end(self):
         self.generate("the meaning of ", n=10)
 
-    def forward(self, x):
-        if type(x) == "str":
-            x = [x]
-        t = self.tokenizer(x, return_tensors="pt", padding=True)
-        x = t["input_ids"]
-        attn_mask = t["attention_mask"]
-        if self.device.type == "cuda":
-            x = x.cuda()
-            attn_mask = attn_mask.cuda()
-        x = self.decode(x, mask=attn_mask)
-        x = x[:, -1]
+    def forward(self, ids, attn_mask):
+        x = self.decode(ids, mask=attn_mask)
         x = self.output(x)
         x = F.softmax(x, dim=-1)
-        return x[:, -1]
+        return x

@@ -52,6 +52,6 @@ if __name__ == "__main__":
         model = GPT2.load_from_checkpoint(args.checkpoint)
         print("Loaded from checkpoint\n")
     else:
-        model = GPT2(d_model=768, n_heads=12, n_layers=12)
+        model = GPT2(d_model=768, n_heads=12, n_layers=6)
 
     trainer.fit(model, train_loader, val_loader)
