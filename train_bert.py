@@ -11,7 +11,7 @@ import data.datasets as datasets
 from models import BertMaskedLM
 
 if __name__ == "__main__":
-    os.environ["TOKENIZERS_PARALLELISM"] = os.getenv("TOKENIZERS_PARALLELISM", "false")
+    os.environ["TOKENIZERS_PARALLELISM"] = os.getenv("TOKENIZERS_PARALLELISM", "true")
 
     with open("datasets_config.json") as f:
         ds_conf = json.load(f)
@@ -19,11 +19,11 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("dataset", choices=list(ds_conf.keys()))
     parser.add_argument("--device", default="gpu", choices=["cpu", "gpu"])
-    parser.add_argument("--epochs", default=5, type=int)
+    parser.add_argument("--epochs", default=10, type=int)
     parser.add_argument("--batch_size", default=16, type=int)
     parser.add_argument("--target_batch_size", default=16, type=int)
     parser.add_argument("--checkpoint", default=None)
-    parser.add_argument("--dataset_size", default=None)
+    parser.add_argument("--dataset_size", default=None, type=int)
     parser.add_argument(
         "--num_workers", default=10, help="num threads to use for dataloaders"
     )
@@ -52,6 +52,6 @@ if __name__ == "__main__":
         model = BertMaskedLM.load_from_checkpoint(args.checkpoint)
         print("Loaded from checkpoint\n")
     else:
-        model = BertMaskedLM(d_model=768, n_heads=12, n_layers=12)
+        model = BertMaskedLM(d_model=768, n_heads=12, n_layers=6)
 
     trainer.fit(model, train_loader, val_loader)

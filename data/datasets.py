@@ -21,10 +21,7 @@ def parse_dataset(file_name, max_size=None, frac=None):
 
 
 def cut_shuffle_df(df, max_size=None, frac=None):
-    assert bool(max_size) ^ bool(frac), "Provide either `max_size` or `frac`"
-    if max_size:
-        frac = min(max_size / len(df), 1)
-    df = df.sample(frac=frac).reset_index(drop=True)
+    df = df.sample(n=max_size, frac=frac).reset_index(drop=True)
     return df
 
 

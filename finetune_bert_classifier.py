@@ -25,7 +25,7 @@ if __name__ == "__main__":
     parser.add_argument("--target_batch_size", default=16, type=int)
     parser.add_argument("--checkpoint", default=None)
     parser.add_argument("--base_checkpoint", default=None)
-    parser.add_argument("--dataset_size", default=None)
+    parser.add_argument("--dataset_size", default=None, type=int)
     parser.add_argument(
         "--num_workers", default=10, help="num threads to use for dataloaders"
     )

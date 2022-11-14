@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 import torchmetrics
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 
 from base.bert_base import BERT
 from base.gpt2_base import GPT2Base
@@ -19,7 +19,7 @@ class BertMaskedLM(pl.LightningModule):
         d_model=768,
         n_layers=12,
         n_heads=12,
-        mask_prob=0.1,
+        mask_prob=0.15,
         tokenizer_name="distilbert-base-uncased",
     ):
         super().__init__()
@@ -58,8 +58,10 @@ class BertMaskedLM(pl.LightningModule):
         rand_dist = torch.rand(ids.shape).to(attn_mask.device.type)
         # fill `self.mask_prob * 100` % of tokens with [MASK]
         fill_mask = rand_dist < self.mask_prob
-        # Fill 15% of the masked tokens with random words instead
-        fill_mask_random = rand_dist < self.mask_prob * 0.15
+        # fill 10% of the masked tokens with random words instead
+        fill_mask_random = rand_dist < self.mask_prob * 0.20
+        # leave 10% of the masked tokens unchanged
+        fill_mask_unchanged = rand_dist < self.mask_prob * 0.10
 
         non_special_mask = (
             torch.isin(
@@ -70,6 +72,7 @@ class BertMaskedLM(pl.LightningModule):
         # we don't want to mask special tokens
         fill_mask = fill_mask * non_special_mask
         fill_mask_random = fill_mask_random * non_special_mask
+        fill_mask_unchanged = fill_mask_unchanged * non_special_mask
 
         # get random tokens to fill in `fill_mask_random`
         fill_mask_random_values = torch.randint(
@@ -78,25 +81,23 @@ class BertMaskedLM(pl.LightningModule):
 
         # filling
         masked_ids = torch.clone(ids)
-        masked_ids.masked_fill_(fill_mask, self.mask_id)
-        masked_ids.masked_scatter_(fill_mask_random, fill_mask_random_values)
+        masked_ids[fill_mask] = self.mask_id
+        masked_ids[fill_mask_random] = fill_mask_random_values[fill_mask_random]
+        masked_ids[fill_mask_unchanged] = ids[fill_mask_unchanged]
 
         o = self(masked_ids, attn_mask)
 
-        oh_target = F.one_hot(ids, num_classes=self.vocab_size).type(o.dtype)
-        o = einops.rearrange(o, "b s d -> 1 (b s) d")
-        oh_target = einops.rearrange(oh_target, "b s d -> 1 (b s) d")
+        o = einops.rearrange(o, "b s v -> (b s) v")
+        target = einops.rearrange(ids, "b s -> (b s)")
         flat_mask = fill_mask.view(-1)
-        w = flat_mask.type(torch.float32)
-        w = w.masked_fill(flat_mask, 1)
-        w = w.masked_fill(~flat_mask, 0.2)
-        w = w.masked_fill(~non_special_mask.view(-1), 0)
-        loss = F.cross_entropy(o, oh_target, reduction="mean", weight=w)
+        o = o[flat_mask]
+        target = target[flat_mask]
+        loss = F.cross_entropy(o, target, reduction="mean")
         return loss
 
     def training_step(self, train_batch, batch_idx):
 
-        if batch_idx % 200 == 0:
+        if batch_idx % 100 == 0:
             self.print_prompt("You are [MASK] rude")
             self.print_prompt("The movie was very [MASK] and boring")
 
@@ -151,7 +152,20 @@ class BertMaskedLM(pl.LightningModule):
             print()
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=3.5e-5)
+        return torch.optim.AdamW(self.parameters(), lr=1e-4)
+        scheduler = get_linear_schedule_with_warmup(optimizer, 10000, self.trainer.max_epochs * 100000)
+        return (
+            [optimizer],
+            [
+                {
+                    "scheduler": scheduler,
+                    "interval": "step",
+                    "frequency": 1,
+                    "reduce_on_plateau": False,
+                    "monitor": "val_loss",
+                }
+            ],
+        )
 
     def forward(self, ids, mask=None):
         x = self.encode(ids, mask=mask)
@@ -190,7 +204,7 @@ class BertClassifier(pl.LightningModule):
         y = y.float()
 
         o = self(x)
-        loss = F.binary_cross_entropy(o, y) # perplexity loss
+        loss = F.binary_cross_entropy(o, y)  # perplexity loss
 
         self.train_acc(o, y)
         self.log("train_loss", loss, on_step=True, on_epoch=False)
