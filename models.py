@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 import torchmetrics
-from transformers import AutoTokenizer, get_linear_schedule_with_warmup
+from transformers import AutoTokenizer, get_constant_schedule_with_warmup
 
 from base.bert_base import BERT
 from base.gpt2_base import GPT2Base
@@ -251,7 +251,11 @@ class GPT2(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-        self.tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+        self.pad_str_token = "[PAD]"
+        self.tokenizer.add_special_tokens({"pad_token": self.pad_str_token})
+        self.eos_token = self.tokenizer.special_tokens_map["eos_token"]
+        self.eos_id = self.tokenizer.vocab[self.eos_token]
+        self.pad_id = self.tokenizer.vocab[self.pad_str_token]
         self.vocab_size = self.tokenizer.vocab_size + 1
         self.decode = GPT2Base(
             self.tokenizer.vocab_size,
@@ -260,7 +264,6 @@ class GPT2(pl.LightningModule):
             n_heads=n_heads,
         )
         self.output = nn.Linear(d_model, self.vocab_size)
-
 
     def step(self, x):
         t = self.tokenizer(x, return_tensors="pt", padding=True)
@@ -272,18 +275,26 @@ class GPT2(pl.LightningModule):
 
         o = self(ids, attn_mask)
 
-        eos = self.tokenizer.special_tokens_map["eos_token"]
-        eos_id = self.tokenizer.vocab[eos]
-        trg = torch.cat([ids[:, 1:], torch.fill(ids[:, 0].unsqueeze(-1), eos_id)], 1)
+        trg = torch.roll(ids, -1)
+        trg[:, -1] = self.pad_id
+        first_pad = (ids != self.pad_id) != (trg != self.pad_id)
+        trg[first_pad] = self.eos_id
 
-        
         o = einops.rearrange(o, "b s v -> (b s) v")
         trg = einops.rearrange(trg, "b s -> (b s)")
 
+        filter_pads = trg != self.pad_id
+        o = o[filter_pads]
+        trg = trg[filter_pads]
+
         return F.cross_entropy(o, trg, reduction="mean")
 
-
     def training_step(self, train_batch, batch_idx):
+
+        if batch_idx % 100 == 0:
+            self.generate("You are so", n=3)
+            self.generate("The movie was", n=3)
+
         x, _ = train_batch
         x = list(x)
 
@@ -302,10 +313,13 @@ class GPT2(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-04)
-        scheduler = get_linear_schedule_with_warmup(
-            optimizer, 10000, self.trainer.max_epochs * 100000
+        warmup_steps = 10000
+        scaled_warmup_steps = int(
+            warmup_steps * self.trainer.target_batch_size // self.trainer.batch_size
         )
+        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-04)
+        # return optimizer
+        scheduler = get_constant_schedule_with_warmup(optimizer, scaled_warmup_steps)
         return (
             [optimizer],
             [
@@ -318,8 +332,29 @@ class GPT2(pl.LightningModule):
                 }
             ],
         )
+
     def generate(self, prompt, n=1):
-        pass
+        for _ in range(n):
+            ids_completed = self._generate(prompt)
+            prompt = self.tokenizer.decode(ids_completed, skip_special_tokens=True)
+            if ids_completed[-1] == self.eos_id:
+                break
+        print(prompt)
+
+    def _generate(self, prompt):
+        with torch.no_grad():
+            t = self.tokenizer([prompt], return_tensors="pt", padding=True)
+            ids = t["input_ids"]
+            attn_mask = t["attention_mask"]
+            if self.device.type == "cuda":
+                ids = ids.cuda()
+                attn_mask = attn_mask.cuda()
+
+            o = self(ids, attn_mask)
+            o = o[0]
+            next_token = torch.argmax(o, dim=-1)[-1]
+            ids_completed = torch.concat([ids[0], next_token[None]])
+            return ids_completed
 
     def on_train_epoch_end(self):
         self.generate("the meaning of ", n=10)

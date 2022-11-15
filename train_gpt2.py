@@ -54,4 +54,6 @@ if __name__ == "__main__":
     else:
         model = GPT2(d_model=768, n_heads=12, n_layers=6)
 
+    trainer.batch_size = args.batch_size
+    trainer.target_batch_size = args.target_batch_size
     trainer.fit(model, train_loader, val_loader)
