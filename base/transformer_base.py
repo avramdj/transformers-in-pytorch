@@ -4,7 +4,6 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-
 MAX_TRILL = 1000
 
 
@@ -30,7 +29,7 @@ class MhaBlock(nn.Module):
     def attention(self, q, k, v, mask):
         scores = torch.einsum("b h i d, b h j d -> b h i j", q, k) / np.sqrt(self.d_k)
         if mask is not None:
-            scores[mask == 0] = -1e9
+            scores = scores.masked_fill(mask == 0, np.NINF)
         a = F.softmax(scores, dim=-1)
         x = a @ v
         return x
@@ -67,6 +66,7 @@ class PostLN(nn.Module):
     """
     https://arxiv.org/pdf/2110.09456.pdf
     """
+
     def __init__(self, sublayer, d_model, dropout=0.1):
         super().__init__()
         self.sublayer = sublayer
@@ -83,6 +83,7 @@ class PreLN(nn.Module):
     """
     https://arxiv.org/pdf/2110.09456.pdf
     """
+
     def __init__(self, sublayer, d_model, dropout=0.1):
         super().__init__()
         self.sublayer = sublayer
@@ -111,11 +112,11 @@ class EncoderBlock(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, d_model, n_layers, n_heads):
+    def __init__(self, d_model, n_layers, n_heads, dropout=0.0):
         super().__init__()
         self.n_heads = n_heads
         self.layers = nn.ModuleList(
-            [EncoderBlock(d_model, n_heads) for _ in range(n_layers)]
+            [EncoderBlock(d_model, n_heads, dropout=dropout) for _ in range(n_layers)]
         )
 
     def forward(self, x, mask=None):
@@ -133,9 +134,11 @@ class DecoderBlock(nn.Module):
         super().__init__()
         self.mmha_sublayer = PreLN(MhaBlock(d_model, n_heads), d_model, dropout)
         self.mha_sublayer = PreLN(MhaBlock(d_model, n_heads), d_model, dropout)
-        self.ffn_sublayer = PreLN(PositionWiseFFN(d_model, d_model * 4), d_model, dropout)
+        self.ffn_sublayer = PreLN(
+            PositionWiseFFN(d_model, d_model * 4), d_model, dropout
+        )
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask):
         masked_q = self.mmha_sublayer(x, mask=mask)
         x = self.mha_sublayer(x, q=masked_q)
         x = self.ffn_sublayer(x)
@@ -151,7 +154,7 @@ class Decoder(nn.Module):
         )
         self.register_buffer("tril_mask", torch.tril(torch.ones(MAX_TRILL, MAX_TRILL)))
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask):
         if mask is not None:
             seq_len = mask.shape[-1]
             mask = einops.repeat(mask, "b s -> b h f s", h=self.n_heads, f=seq_len)

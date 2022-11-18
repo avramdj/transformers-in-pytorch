@@ -1,0 +1,20 @@
+trainer:
+  max_epochs: 10
+  accelerator: gpu
+  enable_checkpointing: True
+  overfit_batches: 0.0
+  accumulate_grad_batches: 16
+
+model:
+  lr: 5e-5
+  d_model: 768
+  n_heads: 12
+  n_layers: 12
+  label_smoothing: 0.1
+  warmup_steps: 8000
+
+data:
+  dataset_config: configs/dataset/mnli.yaml
+  batch_size: 16
+  validation_size: 0.2
+  num_workers: 10

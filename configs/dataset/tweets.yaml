@@ -1,0 +1,6 @@
+class: TweetDataset
+path: /home/avram/notebooks/data/t.csv
+cols:
+  - name: tweet
+  - name: target
+    type: float

@@ -1,0 +1,10 @@
+class: ImdbDataset
+path: /home/avram/notebooks/data/imdb.csv
+cols:
+  - name: review
+    transforms:
+      - "lambda x: x[:512]"
+  - name: sentiment
+    type: bool
+    transforms:
+      - 'lambda x: x == "positive"'

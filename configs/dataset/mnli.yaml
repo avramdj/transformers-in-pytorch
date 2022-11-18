@@ -1,0 +1,7 @@
+class: MNLI
+path: /home/avram/notebooks/data/multinli_1.0/multinli_1.0_train.jsonl
+cols:
+  - name: sentence1
+    transforms: 'lambda x: x[:512]'
+  - name: sentence2
+    transforms: 'lambda x: x[:512]'
