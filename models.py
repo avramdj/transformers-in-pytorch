@@ -39,6 +39,7 @@ class BertMaskedLM(pl.LightningModule):
         self.mask_prob = mask_prob
         self.warmup_steps = warmup_steps
         self.lr = lr
+        self.last_save = None
 
         self.encode = BertBase(
             self.tokenizer.vocab_size,
@@ -123,8 +124,7 @@ class BertMaskedLM(pl.LightningModule):
             print(s[0])
             self.print_prompt("hello[MASK]", k=1)
             self.print_prompt("[MASK]world", k=1)
-            self.print_prompt("i[MASK]", k=1)
-            # self.print_prompt("the movie was very [MASK] and boring")
+            self.print_prompt("the movie was very [MASK] and boring", k=1)
 
         loss = self.step(s)
 
@@ -147,15 +147,17 @@ class BertMaskedLM(pl.LightningModule):
         return loss
 
     def on_train_epoch_end(self):
-        pass
-        # save_path = os.path.join(
-        #     self.trainer.log_dir, f"encoder-{self.trainer.global_step}"
-        # )
-        # with open(save_path, "wb") as f:
-        #     torch.save(self.encode, f)
-        #     print(f"Saved base checkpoint at {save_path}")
+        if self.last_save:
+            os.remove(self.last_save)
+        save_path = os.path.join(
+            self.trainer.log_dir, f"encoder-{self.trainer.global_step}"
+        )
+        with open(save_path, "wb") as f:
+            torch.save(self.encode, f)
+            print(f"Saved base checkpoint at {save_path}")
+        self.last_save = save_path
 
-    def print_prompt(self, prompt, k=2):
+    def print_prompt(self, prompt, k=1):
         with torch.no_grad():
             t = self.tokenizer([prompt], return_tensors="pt", padding=True)
             ids = t["input_ids"]

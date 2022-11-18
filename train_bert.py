@@ -1,9 +1,9 @@
-import yaml
 import os
 import sys
 from argparse import ArgumentParser
 
 import pytorch_lightning as pl
+import yaml
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 

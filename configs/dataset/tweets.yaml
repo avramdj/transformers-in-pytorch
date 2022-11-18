@@ -2,5 +2,7 @@ class: TweetDataset
 path: /home/avram/notebooks/data/t.csv
 cols:
   - name: tweet
+    transforms: 'lambda x: x[:512]'
   - name: target
     type: float
+    transforms: 'lambda x: x == 4'

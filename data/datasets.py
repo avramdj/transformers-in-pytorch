@@ -1,14 +1,14 @@
+import json
+import os
 import pathlib
 from pydoc import locate
-import os
-from typing import List, Iterable
+from typing import Iterable, List
 
+import pandas as pd
 import pytorch_lightning as pl
 import yaml
-import json
-import pandas as pd
-from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, Dataset
 
 MAX_SEQ_LEN = 512
 

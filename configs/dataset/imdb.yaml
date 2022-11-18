@@ -5,6 +5,6 @@ cols:
     transforms:
       - "lambda x: x[:512]"
   - name: sentiment
-    type: bool
+    type: float
     transforms:
       - 'lambda x: x == "positive"'
