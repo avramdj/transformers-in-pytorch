@@ -84,9 +84,6 @@ class _MetaWrapper(type):
 
 
 class WrappedDataset(Dataset, metaclass=_MetaWrapper):
-    def __init__(self):
-        super().__init__()
-
     def __len__(self):
         raise NotImplementedError()
 
@@ -107,6 +104,7 @@ class ConfigurableDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.validation_size = validation_size
         self.num_workers = num_workers
+        self.train_dataset, self.val_dataset = None, None
 
     def prepare_data(self):
         dataset = ConfigurableDataset.from_yaml(self.dataset_config)
@@ -125,12 +123,47 @@ class ConfigurableDataModule(pl.LightningDataModule):
 
 
 class ConfigurableDataset(WrappedDataset):
-    DEFAULT_TYPE = "str"
+    DEFAULT_TYPE = str
 
     def __init__(self, config: dict):
         super().__init__()
         self.config = Config(config)
+        self._col_type_map = self._get_col_type_map()
+        self._col_transform_map = self._get_col_transform_map()
         self.df = _parse_dataset(self.config.path)
+
+    def _get_col_type_map(self):
+        return {
+            x.name: locate(x.type) if "type" in x else self.DEFAULT_TYPE
+            for x in self.config.cols
+        }
+
+    def _get_col_transform_map(self):
+        for col in self.config.cols:
+            if "transforms" in col and not bool(os.getenv("ALLOW_TRANSFORMS", False)):
+                raise Exception(
+                    """
+                Transforms should be avoided because of potential arbitrary code execution.
+                It's much better and safer to preprocess your datasets.
+                To enable them, set the ALLOW_TRANSFORMS environment variable
+                """
+                )
+        return {
+            x.name: self._create_transform_pipe(x.transforms)
+            if "transforms" in x
+            else lambda x: x
+            for x in self.config.cols
+        }
+
+    def _create_transform_pipe(self, strs_callable):
+        pipe = []
+        if not isinstance(strs_callable, list):
+            strs_callable = [strs_callable]
+        for str_callable in strs_callable:
+            transform_fn = eval(str_callable)
+            assert callable(transform_fn), "Not a valid transform"
+            pipe.append(transform_fn)
+        return pipe
 
     @classmethod
     def from_yaml(cls, config_path):
@@ -144,39 +177,12 @@ class ConfigurableDataset(WrappedDataset):
             config = json.load(f)
         return cls(config)
 
-    @staticmethod
-    def _type_cast(x, type_name):
-        type_cls = locate(type_name)
-        return type_cls(x)
-
-    @staticmethod
-    def _apply_stransform(x, str_callable: str):
-        transform_fn = eval(str_callable)
-        assert callable(transform_fn), "Not a valid transform"
-        return _apply(x, transform_fn)
-
-    @staticmethod
-    def _apply_stransforms(x, strs_callable: List[str]):
-        if bool(os.getenv("ALLOW_TRANSFORMS", False)) != True:
-            raise Exception(
-                """
-            Transforms should be avoided because of potential arbitrary code execution.
-            It's much better and safer to preprocess your datasets.
-            To enable them, set the ALLOW_TRANSFORMS environment variable
-            """
-            )
-        for str_call in strs_callable:
-            x = ConfigurableDataset._apply_stransform(x, str_call)
-        return x
-
     def _parse_col(self, col, index):
         items = self.df[col.name][index]
-        if "transforms" in col:
-            t = col.transforms
-            if not isinstance(t, list):
-                t = [t]
-            items = self._apply_stransforms(items, t)
-        items = self._type_cast(items, col.get("type", self.DEFAULT_TYPE))
+        pipe = self._col_transform_map[col.name]
+        for fn in pipe:
+            items = _apply(items, fn)
+        items = self._col_type_map[col.name](items)
         return items
 
     def __len__(self):
