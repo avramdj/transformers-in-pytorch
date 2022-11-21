@@ -28,8 +28,7 @@ class BertBase(nn.Module):
 
     def _init_weights(self):
         """
-        some insane bert initialization
-        found at https://huggingface.co/bert-base-uncased/raw/main/config.json
+        initialization from https://huggingface.co/bert-base-uncased/raw/main/config.json
         """
         for module in self.modules():
             if isinstance(module, nn.Linear):
@@ -73,11 +72,12 @@ class BertLMPredictionHead(nn.Module):
 class BertPredictionHeadTransform(nn.Module):
     def __init__(self, d_model):
         super().__init__()
-        self.dense = nn.Linear(d_model, d_model)
+        self.linear = nn.Linear(d_model, d_model)
         self.LayerNorm = nn.LayerNorm(d_model)
+        nn.init.kaiming_normal_(self.linear.weight)
 
     def forward(self, x):
-        x = self.dense(x)
+        x = self.linear(x)
         x = F.gelu(x)
         x = self.LayerNorm(x)
         return x

@@ -1,5 +1,4 @@
 import os
-import sys
 from argparse import ArgumentParser
 
 import pytorch_lightning as pl
@@ -7,7 +6,7 @@ import yaml
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 
-from data.datasets import ConfigurableDataset
+from data.datasets import ConfigurableDataset, MNLI
 from models import BertMaskedLM
 
 if __name__ == "__main__":
@@ -28,8 +27,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     assert args.epochs > 0, "more epochs pls"
 
-    with open(args.dataset_config) as f:
-        ds_conf = yaml.full_load(f)
+    # with open(args.dataset_config) as f:
+    #     ds_conf = yaml.full_load(f)
 
     epochs = args.epochs
     batch_size = args.batch_size
@@ -45,7 +44,7 @@ if __name__ == "__main__":
         enable_checkpointing = False
         log_every_n_steps = 1
 
-    dataset = ConfigurableDataset(ds_conf)
+    dataset = MNLI(args.dataset_config)
     train_dataset, val_dataset = train_test_split(dataset, train_size=0.8)
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, num_workers=args.num_workers, shuffle=True

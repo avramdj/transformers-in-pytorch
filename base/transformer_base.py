@@ -74,8 +74,8 @@ class PostLN(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, **kwargs):
-        l = self.sublayer(x, **kwargs)
-        x = self.norm(x + l)
+        xp = self.sublayer(x, **kwargs)
+        x = self.norm(x + xp)
         return self.dropout(x)
 
 
@@ -91,9 +91,9 @@ class PreLN(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, **kwargs):
-        l = self.sublayer(x, **kwargs)
-        l = self.norm(l)
-        x = x + l
+        xp = self.sublayer(x, **kwargs)
+        xp = self.norm(xp)
+        x = x + xp
         return self.dropout(x)
 
 

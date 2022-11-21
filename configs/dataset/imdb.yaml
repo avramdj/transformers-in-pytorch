@@ -1,4 +1,3 @@
-class: ImdbDataset
 path: /home/avram/notebooks/data/imdb.csv
 cols:
   - name: review

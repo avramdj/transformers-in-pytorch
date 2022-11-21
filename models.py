@@ -1,4 +1,5 @@
 import os
+import pathlib
 
 import einops
 import pytorch_lightning as pl
@@ -11,11 +12,12 @@ from transformers import (
     AutoTokenizer,
     BertModel,
     get_constant_schedule_with_warmup,
+    get_linear_schedule_with_warmup
 )
 
 from base.bert_base import BertBase, BertLMPredictionHead
 from base.gpt2_base import GPT2Base
-from base.utils import LabelSmoothing
+from base.utils.label_smoothing import LabelSmoothing
 
 
 class BertMaskedLM(pl.LightningModule):
@@ -29,6 +31,7 @@ class BertMaskedLM(pl.LightningModule):
         tokenizer_name="bert-base-uncased",
         warmup_steps=1,
         lr=5e-5,
+        dropout=0.1,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -39,6 +42,7 @@ class BertMaskedLM(pl.LightningModule):
         self.mask_prob = mask_prob
         self.warmup_steps = warmup_steps
         self.lr = lr
+        self.label_smoothing = label_smoothing
         self.last_save = None
 
         self.encode = BertBase(
@@ -46,11 +50,11 @@ class BertMaskedLM(pl.LightningModule):
             d_model=d_model,
             n_layers=n_layers,
             n_heads=n_heads,
+            dropout=dropout,
         )
         if os.getenv("DEBUG_OG"):
             print("USING OG BERT ARCH")
             self.encode = BertModel(AutoConfig.from_pretrained(tokenizer_name))
-        self.label_smoothing = label_smoothing
         self.out = BertLMPredictionHead(
             d_model,
             self.tokenizer.vocab_size,
@@ -106,10 +110,10 @@ class BertMaskedLM(pl.LightningModule):
         flat_mask = fill_mask.view(-1)
         o = o[flat_mask]
         target = target[flat_mask]
-        loss = F.binary_cross_entropy(o, target, reduction="mean")
-        # loss = F.cross_entropy(
-        #     o, target, reduction="mean", label_smoothing=self.label_smoothing
-        # )
+        # loss = F.binary_cross_entropy_with_logits(o, target, reduction="mean")
+        loss = F.cross_entropy(
+            o, target, reduction="mean", label_smoothing=self.label_smoothing
+        )
         return loss
 
     def training_step(self, train_batch, batch_idx):
@@ -129,7 +133,7 @@ class BertMaskedLM(pl.LightningModule):
         loss = self.step(s)
 
         if len(self.trainer.lr_scheduler_configs):
-            lr = self.trainer.lr_scheduler_configs[0].scheduler.get_last_lr()[0]
+            lr = self.trainer.lr_scheduler_configs[-1].scheduler.get_last_lr()[0]
             self.log("lr", lr, on_step=True, on_epoch=False, prog_bar=True)
         self.log("train_loss", loss, on_step=True, on_epoch=False)
 
@@ -146,7 +150,24 @@ class BertMaskedLM(pl.LightningModule):
         self.log("val_loss", loss, on_step=True, on_epoch=False)
         return loss
 
+    def on_train_batch_end(self, *args, **kwargs):
+        # return
+        self.every = 1000 // self.trainer.accumulate_grad_batches
+        dirpath = "./lightning_logs"
+        if self.trainer.global_step % self.every == 0:
+            assert dirpath is not None
+            current = pathlib.Path(dirpath) / f"latest-{self.trainer.global_step}.ckpt"
+            prev = (
+                pathlib.Path(dirpath)
+                / f"latest-{self.trainer.global_step - self.every}.ckpt"
+            )
+            if current.exists():
+                return
+            self.trainer.save_checkpoint(current)
+            prev.unlink(missing_ok=True)
+
     def on_train_epoch_end(self):
+        return
         if self.last_save:
             os.remove(self.last_save)
         save_path = os.path.join(
@@ -180,8 +201,8 @@ class BertMaskedLM(pl.LightningModule):
     def configure_optimizers(self):
         warmup_steps = self.warmup_steps
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
-        # return optimizer
         scheduler = get_constant_schedule_with_warmup(optimizer, warmup_steps)
+        # scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, 1500)
         return (
             [optimizer],
             [
@@ -200,7 +221,6 @@ class BertMaskedLM(pl.LightningModule):
         if os.getenv("DEBUG_OG"):
             x = x.last_hidden_state
         x = self.out(x)
-        x = F.softmax(x, dim=-1)
         return x
 
 
@@ -408,5 +428,4 @@ class GPT2(pl.LightningModule):
     def forward(self, ids, attn_mask):
         x = self.decode(ids, mask=attn_mask)
         x = self.output(x)
-        x = F.softmax(x, dim=-1)
         return x

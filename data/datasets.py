@@ -108,8 +108,12 @@ class ConfigurableDataModule(pl.LightningDataModule):
 
     def prepare_data(self):
         dataset = ConfigurableDataset.from_yaml(self.dataset_config)
-        splits = train_test_split(dataset, test_size=self.validation_size)
-        self.train_dataset, self.val_dataset = splits
+        if self.validation_size == 0:
+            self.train_dataset = dataset
+            self.val_dataset = []
+        else:
+            splits = train_test_split(dataset, test_size=self.validation_size)
+            self.train_dataset, self.val_dataset = splits
 
     def train_dataloader(self):
         return DataLoader(
