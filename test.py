@@ -1,7 +1,6 @@
 import unittest
 import torch
 
-# Assuming your classes are defined in a module called models
 from base.bert_base import BertEmbedding
 from base.transformer_base import (
     MhaBlock,
