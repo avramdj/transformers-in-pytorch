@@ -97,20 +97,6 @@ class PreLN(nn.Module):
         return self.dropout(x)
 
 
-class EncoderBlock(nn.Module):
-    def __init__(self, d_model, n_heads, dropout=0.1):
-        super().__init__()
-        self.mha_sublayer = PreLN(MhaBlock(d_model, n_heads), d_model, dropout)
-        self.ffn_sublayer = PreLN(
-            PositionWiseFFN(d_model, d_model * 4), d_model, dropout
-        )
-
-    def forward(self, x, mask=None):
-        x = self.mha_sublayer(x, mask=mask)
-        x = self.ffn_sublayer(x)
-        return x
-
-
 class Encoder(nn.Module):
     def __init__(self, d_model, n_layers, n_heads, dropout=0.0):
         super().__init__()
@@ -126,6 +112,20 @@ class Encoder(nn.Module):
             )
         for layer in self.layers:
             x = layer(x, mask=mask)
+        return x
+
+
+class EncoderBlock(nn.Module):
+    def __init__(self, d_model, n_heads, dropout=0.1):
+        super().__init__()
+        self.mha_sublayer = PreLN(MhaBlock(d_model, n_heads), d_model, dropout)
+        self.ffn_sublayer = PreLN(
+            PositionWiseFFN(d_model, d_model * 4), d_model, dropout
+        )
+
+    def forward(self, x, mask=None):
+        x = self.mha_sublayer(x, mask=mask)
+        x = self.ffn_sublayer(x)
         return x
 
 

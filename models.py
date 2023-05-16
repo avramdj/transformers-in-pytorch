@@ -12,7 +12,7 @@ from transformers import (
     AutoTokenizer,
     BertModel,
     get_constant_schedule_with_warmup,
-    get_linear_schedule_with_warmup
+    get_linear_schedule_with_warmup,
 )
 
 from base.bert_base import BertBase, BertLMPredictionHead
@@ -202,7 +202,7 @@ class BertMaskedLM(pl.LightningModule):
         warmup_steps = self.warmup_steps
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         scheduler = get_constant_schedule_with_warmup(optimizer, warmup_steps)
-        # scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, 1500)
+        # scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, 4000)
         return (
             [optimizer],
             [
@@ -308,9 +308,15 @@ class GPT2(pl.LightningModule):
         n_heads=12,
         label_smoothing=0.0,
         tokenizer_name="gpt2",
+        warmup_steps=1,
+        lr=5e-5,
+        dropout=0.1,
     ):
         super().__init__()
         self.save_hyperparameters()
+        self.warmup_steps = warmup_steps
+        self.dropout = dropout
+        self.lr = lr
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         self.pad_str_token = "[PAD]"
         self.tokenizer.add_special_tokens({"pad_token": self.pad_str_token})
@@ -362,8 +368,12 @@ class GPT2(pl.LightningModule):
         x = list(x)
 
         if batch_idx % 100 == 0:
-            print(self.generate("you are so", n=3))
-            print(self.generate(" ".join(x[0].split(" ")[:3]), n=3))
+            s = "you are so"
+            red_string(self.generate(s, n=3), len(s))
+            s = "This"
+            red_string(self.generate(s, n=6), len(s))
+            s = " ".join(x[0].split(" ")[:3])
+            red_string(self.generate(s, n=3), len(s))
 
         loss = self.step(x)
 
@@ -382,8 +392,8 @@ class GPT2(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        warmup_steps = 8000
-        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)
+        warmup_steps = self.warmup_steps
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         # return optimizer
         scheduler = get_constant_schedule_with_warmup(optimizer, warmup_steps)
         return (
@@ -429,3 +439,7 @@ class GPT2(pl.LightningModule):
         x = self.decode(ids, mask=attn_mask)
         x = self.output(x)
         return x
+
+
+def red_string(s, n):
+    print("\033[31;1m" + s[:n] + "\033[0m" + s[n:])
